@@ -1,3 +1,4 @@
+from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import pandas as pd
 from typing import Dict, Any
@@ -10,15 +11,18 @@ app = FastAPI(title="BTC Trading Signal Generator", version="1.0.0")
 # Global variables
 btc_data = None
 current_index = 0
-data_fetcher = BTCDataFetcher()
-signal_evaluator = SignalEvaluator()
+data_fetcher = None
+signal_evaluator = None
 
 @app.on_event("startup")
 async def startup_event():
-    """Fetch historical data on startup"""
-    global btc_data
+    """Initialize components on startup"""
+    global btc_data, data_fetcher, signal_evaluator
+    print("Initializing BTC Signal Generator...")
+    data_fetcher = BTCDataFetcher()
+    signal_evaluator = SignalEvaluator()
     print("Fetching historical BTC data...")
-    btc_data = data_fetcher.fetch_historical_data(years=10)
+    btc_data = data_fetcher.fetch_historical_data(years=2)  # Reduced to 2 years for faster loading
     print(f"Fetched {len(btc_data)} hourly candles")
 
 @app.get("/")
@@ -27,15 +31,19 @@ async def root():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy", "data_points": len(btc_data) if btc_data is not None else 0}
+    return {
+        "status": "healthy", 
+        "data_points": len(btc_data) if btc_data is not None else 0,
+        "current_index": current_index
+    }
 
 @app.get("/signal/next")
 async def get_next_signal():
     """Get signal for next candle and evaluate profitability"""
     global current_index
     
-    if btc_data is None:
-        raise HTTPException(status_code=503, detail="Data not loaded yet")
+    if btc_data is None or data_fetcher is None or signal_evaluator is None:
+        raise HTTPException(status_code=503, detail="Service not initialized yet")
     
     if current_index + 100 >= len(btc_data):  # Need future prices for evaluation
         current_index = 0  # Reset to beginning
@@ -100,6 +108,7 @@ async def get_current_status():
         "remaining_candles": len(btc_data) - current_index if btc_data is not None else 0
     }
 
+# For local development
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
