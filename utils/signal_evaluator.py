@@ -23,14 +23,14 @@ class SignalEvaluator:
                 'close': float(row['close']),
                 'volume': float(row['volume'])
             })
-        return formatted_data
+        return formatted_data[-10:]  # Only send last 10 candles to avoid token limits
     
     async def generate_signal(self, ohlc_data: list) -> Dict[str, Any]:
         """Generate trading signal using DeepSeek API"""
         
         prompt = f"""
         Analyze the following BTC/USDT hourly OHLC data and generate a trading signal.
-        Respond with a JSON object containing: signal (BUY|SELL|HOLD), stop_price, target_price, 
+        Respond with ONLY a JSON object containing: signal (BUY|SELL|HOLD), stop_price, target_price, 
         confidence (0-100), and reason.
         
         OHLC Data (most recent last):
@@ -38,6 +38,7 @@ class SignalEvaluator:
         
         Important: Consider technical analysis, price action, volume patterns, and market structure.
         Provide realistic stop and target prices based on support/resistance levels.
+        Return ONLY JSON, no other text.
         """
         
         headers = {
@@ -50,7 +51,7 @@ class SignalEvaluator:
             "messages": [
                 {
                     "role": "system",
-                    "content": "You are an expert cryptocurrency trading analyst. Analyze OHLC data and provide clear trading signals with proper risk management."
+                    "content": "You are an expert cryptocurrency trading analyst. Analyze OHLC data and provide clear trading signals with proper risk management. Always respond with ONLY a valid JSON object."
                 },
                 {
                     "role": "user",
@@ -70,15 +71,18 @@ class SignalEvaluator:
                         
                         # Extract JSON from response
                         try:
-                            # Find JSON object in the response
-                            json_start = response_content.find('{')
-                            json_end = response_content.rfind('}') + 1
-                            if json_start != -1 and json_end != -1:
-                                json_str = response_content[json_start:json_end]
-                                signal_data = json.loads(json_str)
-                                return signal_data
-                        except json.JSONDecodeError:
-                            print("Failed to parse JSON response")
+                            # Clean the response to extract JSON
+                            json_str = response_content.strip()
+                            if json_str.startswith('```json'):
+                                json_str = json_str[7:-3].strip()
+                            elif json_str.startswith('```'):
+                                json_str = json_str[3:-3].strip()
+                                
+                            signal_data = json.loads(json_str)
+                            return signal_data
+                        except json.JSONDecodeError as e:
+                            print(f"Failed to parse JSON response: {e}")
+                            print(f"Response content: {response_content}")
                             return self._get_default_signal()
                     
                     print(f"API request failed with status {response.status}")
@@ -102,27 +106,33 @@ class SignalEvaluator:
                                    future_prices, hours_to_evaluate=24):
         """
         Evaluate if the trade would have been profitable
-        Returns: (is_profitable, actual_outcome, profit_loss_percent)
         """
-        if signal == "HOLD":
+        if signal == "HOLD" or not future_prices:
             return False, "HOLD", 0
+        
+        # Set default stop and target if not provided
+        if stop_price is None:
+            stop_price = entry_price * 0.98 if signal == "BUY" else entry_price * 1.02
+        
+        if target_price is None:
+            target_price = entry_price * 1.03 if signal == "BUY" else entry_price * 0.97
         
         # Check if stop or target hit within next X hours
         for i, future_price in enumerate(future_prices[:hours_to_evaluate]):
             if signal == "BUY":
-                if stop_price and future_price <= stop_price:
+                if future_price <= stop_price:
                     return False, "STOP_LOSS", ((stop_price - entry_price) / entry_price) * 100
-                if target_price and future_price >= target_price:
+                if future_price >= target_price:
                     return True, "TAKE_PROFIT", ((target_price - entry_price) / entry_price) * 100
             
             elif signal == "SELL":
-                if stop_price and future_price >= stop_price:
+                if future_price >= stop_price:
                     return False, "STOP_LOSS", ((entry_price - stop_price) / entry_price) * 100
-                if target_price and future_price <= target_price:
+                if future_price <= target_price:
                     return True, "TAKE_PROFIT", ((entry_price - target_price) / entry_price) * 100
         
         # If neither hit, use final price
-        final_price = future_prices[hours_to_evaluate - 1]
+        final_price = future_prices[min(hours_to_evaluate, len(future_prices)) - 1]
         if signal == "BUY":
             pnl = ((final_price - entry_price) / entry_price) * 100
             outcome = "EXIT_AT_END"
