@@ -2,14 +2,18 @@ import json
 import aiohttp
 from typing import Dict, Any
 import os
+import logging
 from dotenv import load_dotenv
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 class SignalEvaluator:
     def __init__(self):
         self.api_key = os.getenv('DEEPSEEK_API_KEY', '')
         self.base_url = "https://api.deepseek.com/v1/chat/completions"
+        logger.info(f"SignalEvaluator initialized with API key: {'Yes' if self.api_key else 'No'}")
         
     def format_ohlc_data(self, df_chunk):
         """Format OHLC data for the prompt"""
@@ -23,10 +27,15 @@ class SignalEvaluator:
                 'close': float(row['close']),
                 'volume': float(row['volume'])
             })
-        return formatted_data[-10:]  # Only send last 10 candles to avoid token limits
+        return formatted_data[-10:]  # Only send last 10 candles
     
     async def generate_signal(self, ohlc_data: list) -> Dict[str, Any]:
-        """Generate trading signal using DeepSeek API"""
+        """Generate trading signal using DeepSeek API or fallback"""
+        
+        # If no API key, use fallback
+        if not self.api_key:
+            logger.warning("No DeepSeek API key found, using fallback signal generator")
+            return self._generate_fallback_signal(ohlc_data)
         
         prompt = f"""
         Analyze the following BTC/USDT hourly OHLC data and generate a trading signal.
@@ -73,24 +82,64 @@ class SignalEvaluator:
                         try:
                             # Clean the response to extract JSON
                             json_str = response_content.strip()
-                            if json_str.startswith('```json'):
-                                json_str = json_str[7:-3].strip()
-                            elif json_str.startswith('```'):
-                                json_str = json_str[3:-3].strip()
+                            if '```json' in json_str:
+                                json_str = json_str.split('```json')[1].split('```')[0].strip()
+                            elif '```' in json_str:
+                                json_str = json_str.split('```')[1].split('```')[0].strip()
                                 
                             signal_data = json.loads(json_str)
                             return signal_data
                         except json.JSONDecodeError as e:
-                            print(f"Failed to parse JSON response: {e}")
-                            print(f"Response content: {response_content}")
-                            return self._get_default_signal()
+                            logger.error(f"Failed to parse JSON response: {e}")
+                            logger.error(f"Response content: {response_content}")
+                            return self._generate_fallback_signal(ohlc_data)
                     
-                    print(f"API request failed with status {response.status}")
-                    return self._get_default_signal()
+                    logger.error(f"API request failed with status {response.status}")
+                    return self._generate_fallback_signal(ohlc_data)
                     
         except Exception as e:
-            print(f"Error calling DeepSeek API: {e}")
-            return self._get_default_signal()
+            logger.error(f"Error calling DeepSeek API: {e}")
+            return self._generate_fallback_signal(ohlc_data)
+    
+    def _generate_fallback_signal(self, ohlc_data):
+        """Generate a fallback signal without API"""
+        latest = ohlc_data[-1]
+        prev = ohlc_data[-2]
+        
+        # Simple trend detection
+        if latest['close'] > latest['open'] and latest['close'] > prev['close']:
+            signal = "BUY"
+            confidence = 65
+            reason = "Bullish candle with upward trend"
+        elif latest['close'] < latest['open'] and latest['close'] < prev['close']:
+            signal = "SELL"
+            confidence = 65
+            reason = "Bearish candle with downward trend"
+        else:
+            signal = "HOLD"
+            confidence = 50
+            reason = "Sideways movement, no clear trend"
+        
+        # Calculate stop and target
+        if signal != "HOLD":
+            atr = (latest['high'] - latest['low']) * 0.5
+            if signal == "BUY":
+                stop_price = latest['low'] - atr
+                target_price = latest['close'] + (2 * atr)
+            else:
+                stop_price = latest['high'] + atr
+                target_price = latest['close'] - (2 * atr)
+        else:
+            stop_price = None
+            target_price = None
+        
+        return {
+            "signal": signal,
+            "stop_price": round(stop_price, 2) if stop_price else None,
+            "target_price": round(target_price, 2) if target_price else None,
+            "confidence": confidence,
+            "reason": f"Fallback signal: {reason}"
+        }
     
     def _get_default_signal(self):
         """Return default HOLD signal if API fails"""
