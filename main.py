@@ -1,5 +1,3 @@
-
-# main.py
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 import pandas as pd
@@ -71,6 +69,18 @@ async def get_next_signal():
     if chunk is None:
         raise HTTPException(status_code=400, detail="Not enough data")
     
+    # Check if previous candle had significant movement (>1%)
+    if not signal_evaluator.should_generate_signal(chunk):
+        # Skip this candle, move to next
+        current_index += 1
+        return JSONResponse(content={
+            "current_index": current_index - 1,
+            "signal_generated": False,
+            "reason": "Previous candle movement < 1% - skipping signal generation",
+            "previous_candle_range_percent": self._calculate_previous_candle_range(chunk),
+            "next_index": current_index
+        })
+    
     # Format OHLC data (exclude the latest candle for signal generation)
     ohlc_formatted = signal_evaluator.format_ohlc_data(chunk)
     
@@ -91,13 +101,18 @@ async def get_next_signal():
         signal_data.get('target_price'), future_prices
     )
     
+    # Calculate previous candle range for reference
+    previous_candle_range = self._calculate_previous_candle_range(chunk)
+    
     # Prepare response
     response = {
         "current_index": current_index,
+        "signal_generated": True,
         "signal_based_on_timestamp": str(chunk.index[-2]),  # Previous candle timestamp
         "entry_timestamp": str(chunk.index[-1]),  # Current candle timestamp
         "entry_price": entry_price,
         "signal_data": signal_data,
+        "previous_candle_range_percent": previous_candle_range,
         "evaluation": {
             "profitable": is_profitable,
             "outcome": outcome,
@@ -110,6 +125,17 @@ async def get_next_signal():
     current_index += 1
     
     return JSONResponse(content=response)
+
+def _calculate_previous_candle_range(self, chunk):
+    """Calculate the price range percentage of the previous candle"""
+    if len(chunk) < 2:
+        return 0.0
+        
+    previous_candle = chunk.iloc[-2]
+    price_range = previous_candle['high'] - previous_candle['low']
+    price_change_percent = (price_range / previous_candle['close']) * 100
+    
+    return round(price_change_percent, 2)
 
 @app.get("/signal/reset")
 async def reset_index():
