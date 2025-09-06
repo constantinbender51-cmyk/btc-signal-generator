@@ -29,6 +29,17 @@ class SignalEvaluator:
             })
         return formatted_data[-11:-1]  # Get candles -11 to -2 (excluding the latest)
     
+    def should_generate_signal(self, df_chunk):
+        """Check if previous candle had significant movement (>1%)"""
+        if len(df_chunk) < 2:
+            return False
+            
+        previous_candle = df_chunk.iloc[-2]
+        price_range = previous_candle['high'] - previous_candle['low']
+        price_change_percent = (price_range / previous_candle['close']) * 100
+        
+        return price_change_percent > 1.0
+    
     async def generate_signal(self, ohlc_data: list) -> Dict[str, Any]:
         """Generate trading signal using DeepSeek API or fallback"""
         
@@ -191,5 +202,3 @@ class SignalEvaluator:
             outcome = "EXIT_AT_END"
         
         return pnl > 0, outcome, pnl
-
-
