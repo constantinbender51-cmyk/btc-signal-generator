@@ -20,17 +20,6 @@ current_index = 0
 data_fetcher = None
 signal_evaluator = None
 
-def _calculate_previous_candle_range(chunk):
-    """Calculate the price range percentage of the previous candle"""
-    if len(chunk) < 2:
-        return 0.0
-        
-    previous_candle = chunk.iloc[-2]
-    price_range = previous_candle['high'] - previous_candle['low']
-    price_change_percent = (price_range / previous_candle['close']) * 100
-    
-    return round(price_change_percent, 2)
-
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
@@ -65,7 +54,7 @@ async def health_check():
 
 @app.get("/signal/next")
 async def get_next_signal():
-    """Get signal based on previous candle but enter at current candle's time"""
+    """Get signal for next candle and evaluate profitability"""
     global current_index
     
     if btc_data is None or data_fetcher is None or signal_evaluator is None:
@@ -75,58 +64,37 @@ async def get_next_signal():
     if current_index + 74 >= len(btc_data):  # 50 + 24 hours for evaluation
         current_index = 0
     
-    # Get current chunk of 50 candles (for signal generation)
+    # Get current chunk of 50 candles
     chunk = data_fetcher.get_data_chunk(btc_data, current_index, 50)
     if chunk is None:
         raise HTTPException(status_code=400, detail="Not enough data")
     
-    # Check if previous candle had significant movement (>1%)
-    if not signal_evaluator.should_generate_signal(chunk):
-        # Calculate range for the response
-        previous_candle_range = _calculate_previous_candle_range(chunk)
-        
-        # Skip this candle, move to next
-        current_index += 1
-        return JSONResponse(content={
-            "current_index": current_index - 1,
-            "signal_generated": False,
-            "reason": "Previous candle movement < 1% - skipping signal generation",
-            "previous_candle_range_percent": previous_candle_range,
-            "next_index": current_index
-        })
-    
-    # Format OHLC data (exclude the latest candle for signal generation)
+    # Format OHLC data
     ohlc_formatted = signal_evaluator.format_ohlc_data(chunk)
     
-    # Generate signal using DeepSeek (based on data up to previous candle)
+    # Generate signal using DeepSeek
     signal_data = await signal_evaluator.generate_signal(ohlc_formatted)
     
-    # Get entry price (current candle's open price - simulating entry at candle open)
-    entry_price = float(chunk.iloc[-1]['open'])
+    # Get entry price (last close in the chunk)
+    entry_price = float(chunk.iloc[-1]['close'])
     
-    # Get future prices for evaluation (next 24 hours starting from current candle)
+    # Get future prices for evaluation (next 24 hours)
     future_start = current_index + 50
     future_end = min(future_start + 24, len(btc_data))
     future_prices = btc_data.iloc[future_start:future_end]['close'].tolist()
     
-    # Evaluate profitability (trade executes at current candle's open)
+    # Evaluate profitability
     is_profitable, outcome, pnl_percent = signal_evaluator.evaluate_trade_profitability(
         signal_data['signal'], entry_price, signal_data.get('stop_price'),
         signal_data.get('target_price'), future_prices
     )
     
-    # Calculate previous candle range for reference
-    previous_candle_range = _calculate_previous_candle_range(chunk)
-    
     # Prepare response
     response = {
         "current_index": current_index,
-        "signal_generated": True,
-        "signal_based_on_timestamp": str(chunk.index[-2]),  # Previous candle timestamp
-        "entry_timestamp": str(chunk.index[-1]),  # Current candle timestamp
+        "entry_timestamp": str(chunk.index[-1]),
         "entry_price": entry_price,
         "signal_data": signal_data,
-        "previous_candle_range_percent": previous_candle_range,
         "evaluation": {
             "profitable": is_profitable,
             "outcome": outcome,
