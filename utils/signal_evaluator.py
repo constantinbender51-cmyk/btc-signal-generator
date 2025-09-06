@@ -16,7 +16,7 @@ class SignalEvaluator:
         logger.info(f"SignalEvaluator initialized with API key: {'Yes' if self.api_key else 'No'}")
         
     def format_ohlc_data(self, df_chunk):
-        """Format OHLC data for the prompt"""
+        """Format OHLC data for the prompt - exclude the very latest candle"""
         formatted_data = []
         for idx, row in df_chunk.iterrows():
             formatted_data.append({
@@ -27,7 +27,7 @@ class SignalEvaluator:
                 'close': float(row['close']),
                 'volume': float(row['volume'])
             })
-        return formatted_data[-10:]  # Only send last 10 candles
+        return formatted_data[-11:-1]  # Get candles -11 to -2 (excluding the latest)
     
     async def generate_signal(self, ohlc_data: list) -> Dict[str, Any]:
         """Generate trading signal using DeepSeek API or fallback"""
@@ -102,11 +102,12 @@ class SignalEvaluator:
             return self._generate_fallback_signal(ohlc_data)
     
     def _generate_fallback_signal(self, ohlc_data):
-        """Generate a fallback signal without API"""
-        latest = ohlc_data[-1]
-        prev = ohlc_data[-2]
+        """Generate a fallback signal without API - based on previous candle"""
+        # ohlc_data now contains candles up to the previous one (last item is previous candle)
+        latest = ohlc_data[-1]  # This is now the previous candle
+        prev = ohlc_data[-2] if len(ohlc_data) > 1 else latest
         
-        # Simple trend detection
+        # Simple trend detection based on previous candle
         if latest['close'] > latest['open'] and latest['close'] > prev['close']:
             signal = "BUY"
             confidence = 65
@@ -120,7 +121,7 @@ class SignalEvaluator:
             confidence = 50
             reason = "Sideways movement, no clear trend"
         
-        # Calculate stop and target
+        # Calculate stop and target based on previous candle
         if signal != "HOLD":
             atr = (latest['high'] - latest['low']) * 0.5
             if signal == "BUY":
@@ -190,3 +191,4 @@ class SignalEvaluator:
             outcome = "EXIT_AT_END"
         
         return pnl > 0, outcome, pnl
+
