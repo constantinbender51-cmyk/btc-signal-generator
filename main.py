@@ -20,6 +20,17 @@ current_index = 0
 data_fetcher = None
 signal_evaluator = None
 
+def _calculate_previous_candle_range(chunk):
+    """Calculate the price range percentage of the previous candle"""
+    if len(chunk) < 2:
+        return 0.0
+        
+    previous_candle = chunk.iloc[-2]
+    price_range = previous_candle['high'] - previous_candle['low']
+    price_change_percent = (price_range / previous_candle['close']) * 100
+    
+    return round(price_change_percent, 2)
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize components on startup"""
@@ -71,13 +82,16 @@ async def get_next_signal():
     
     # Check if previous candle had significant movement (>1%)
     if not signal_evaluator.should_generate_signal(chunk):
+        # Calculate range for the response
+        previous_candle_range = _calculate_previous_candle_range(chunk)
+        
         # Skip this candle, move to next
         current_index += 1
         return JSONResponse(content={
             "current_index": current_index - 1,
             "signal_generated": False,
             "reason": "Previous candle movement < 1% - skipping signal generation",
-            "previous_candle_range_percent": self._calculate_previous_candle_range(chunk),
+            "previous_candle_range_percent": previous_candle_range,
             "next_index": current_index
         })
     
@@ -102,7 +116,7 @@ async def get_next_signal():
     )
     
     # Calculate previous candle range for reference
-    previous_candle_range = self._calculate_previous_candle_range(chunk)
+    previous_candle_range = _calculate_previous_candle_range(chunk)
     
     # Prepare response
     response = {
@@ -125,17 +139,6 @@ async def get_next_signal():
     current_index += 1
     
     return JSONResponse(content=response)
-
-def _calculate_previous_candle_range(self, chunk):
-    """Calculate the price range percentage of the previous candle"""
-    if len(chunk) < 2:
-        return 0.0
-        
-    previous_candle = chunk.iloc[-2]
-    price_range = previous_candle['high'] - previous_candle['low']
-    price_change_percent = (price_range / previous_candle['close']) * 100
-    
-    return round(price_change_percent, 2)
 
 @app.get("/signal/reset")
 async def reset_index():
