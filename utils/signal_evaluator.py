@@ -192,3 +192,4 @@ class SignalEvaluator:
         
         return pnl > 0, outcome, pnl
 
+
