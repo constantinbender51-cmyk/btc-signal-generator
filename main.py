@@ -56,36 +56,36 @@ async def health_check():
 
 @app.get("/signal/next")
 async def get_next_signal():
-    """Get signal for previous candle and evaluate profitability"""
+    """Get signal based on previous candle but enter at current candle's time"""
     global current_index
     
     if btc_data is None or data_fetcher is None or signal_evaluator is None:
         raise HTTPException(status_code=503, detail="Service not initialized yet")
     
     # Reset if we reach the end
-    if current_index + 75 >= len(btc_data):  # 51 + 24 hours for evaluation
+    if current_index + 74 >= len(btc_data):  # 50 + 24 hours for evaluation
         current_index = 0
     
-    # Get chunk of 51 candles (we need one extra for the previous candle)
-    chunk = data_fetcher.get_data_chunk(btc_data, current_index, 51)
+    # Get current chunk of 50 candles (for signal generation)
+    chunk = data_fetcher.get_data_chunk(btc_data, current_index, 50)
     if chunk is None:
         raise HTTPException(status_code=400, detail="Not enough data")
     
-    # Format OHLC data (exclude the latest candle)
+    # Format OHLC data (exclude the latest candle for signal generation)
     ohlc_formatted = signal_evaluator.format_ohlc_data(chunk)
     
     # Generate signal using DeepSeek (based on data up to previous candle)
     signal_data = await signal_evaluator.generate_signal(ohlc_formatted)
     
-    # Get entry price (close of the previous candle, which is now the last in our formatted data)
-    entry_price = float(chunk.iloc[-2]['close'])  # -2 because -1 is the current candle
+    # Get entry price (current candle's open price - simulating entry at candle open)
+    entry_price = float(chunk.iloc[-1]['open'])
     
     # Get future prices for evaluation (next 24 hours starting from current candle)
-    future_start = current_index + 50  # +50 because we have 51 candles total
+    future_start = current_index + 50
     future_end = min(future_start + 24, len(btc_data))
     future_prices = btc_data.iloc[future_start:future_end]['close'].tolist()
     
-    # Evaluate profitability (trade would execute at previous candle's close)
+    # Evaluate profitability (trade executes at current candle's open)
     is_profitable, outcome, pnl_percent = signal_evaluator.evaluate_trade_profitability(
         signal_data['signal'], entry_price, signal_data.get('stop_price'),
         signal_data.get('target_price'), future_prices
@@ -94,7 +94,8 @@ async def get_next_signal():
     # Prepare response
     response = {
         "current_index": current_index,
-        "entry_timestamp": str(chunk.index[-2]),  # Previous candle timestamp
+        "signal_based_on_timestamp": str(chunk.index[-2]),  # Previous candle timestamp
+        "entry_timestamp": str(chunk.index[-1]),  # Current candle timestamp
         "entry_price": entry_price,
         "signal_data": signal_data,
         "evaluation": {
