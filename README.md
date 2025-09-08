@@ -1,19 +1,16 @@
-# BTC Trading Signal Generator
-
-A FastAPI application that fetches 10 years of BTC price data from Binance and uses DeepSeek AI to generate trading signals.
-
-## Features
-
-- Fetches 10 years of hourly BTC/USDT data from Binance
-- Uses DeepSeek AI to analyze OHLC data and generate signals
-- Evaluates signal profitability using future price data
-- REST API endpoints for signal generation and evaluation
-- Deployable on Railway
-
-## Setup
-
-1. Clone the repository
-2. Install dependencies: `pip install -r requirements.txt`
-3. Set up DeepSeek API key as environment variable:
-   ```bash
-   export DEEPSEEK_API_KEY='your-api-key-here'
+> ⚠️ **Clarification**  
+> This repository – along with every other “bot” project in the `constantinbender51-cmyk` namespace – is **scrap / legacy code** and should **not** be treated as a working or profitable trading system.  
+>  
+> The **only** repos that still receive updates and are intended for forward-testing are:  
+> - `constantinbender51-cmyk/sigtrabot`  
+> - `constantinbender51-cmyk/DeepSeekGenerator-v.-1.4` (a.k.a. “DeepSignal v. 1.4”)  
+>  
+> Complete list of repos that remain **functionally maintained** (but still **unproven** in live, statistically-significant trading):  
+> - `constantinbender51-cmyk/Kraken-futures-API`  
+> - `constantinbender51-cmyk/sigtrabot`  
+> - `constantinbender51-cmyk/binance-btc-data`  
+> - `constantinbender51-cmyk/SigtraConfig`  
+> - `constantinbender51-cmyk/Simple-bot-complex-behavior-project-`  
+> - `constantinbender51-cmyk/DeepSeekGenerator-v.-1.4`  
+>  
+> > None of the above has demonstrated **statistically significant profitability** in out-of-sample, live trading; **DeepSignal v. 1.4** is merely **showing early promise** and remains experimental.
